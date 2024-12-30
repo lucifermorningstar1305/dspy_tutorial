@@ -6,6 +6,6 @@ if __name__ == "__main__":
     print(lm("Say 'this is a test!'", temperature=0.7))
 
     qa = dspy.ChainOfThought("question -> answer")
-    response = qa(question="Can anyone beat Meta in social networking platform?")
+    response = qa(question="What is an Imperative computation grpah?")
     print(response.answer)
-    print(lm.history)
+    # print(lm.history)
