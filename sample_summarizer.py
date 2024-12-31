@@ -1,3 +1,4 @@
+from typing import List
 import dspy
 import json
 import chromadb
@@ -8,6 +9,44 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
 
 from dspy.retrieve import chromadb_rm
+
+
+class RAG(dspy.Module):
+    def __init__(self):
+        self.retriever = chromadb_rm.ChromadbRM(
+            collection_name="sample_collection", persist_directory="./db"
+        )
+
+        self.respond = dspy.ChainOfThought("context, question -> answer")
+
+    def forward(self, question):
+        ref_docs = self.retriever(question)
+        contexts = [doc["long_text"] for doc in ref_docs]
+        return self.respond(context=contexts, question=question)
+
+
+class ChunkSummarizer(dspy.Module):
+    def __init__(self):
+        self.summarizer = dspy.ChainOfThought("text -> summary")
+
+    def forward(self, text: str) -> str:
+        return self.summarizer(text=text).summary
+
+
+class MapReduceSummarizer(dspy.Module):
+    def __init__(self):
+        self.chunk_summarizer = ChunkSummarizer()
+        self.final_summarizer = dspy.ChainOfThought("summary -> final_summary")
+
+    def forward(self, chunks: List[str]) -> str:
+        chunk_summaries = [self.chunk_summarizer(chunk) for chunk in chunks]
+        combined_summaries = " ".join(chunk_summaries)
+        return self.final_summarizer(summary=combined_summaries).final_summary
+
+
+def get_chunks(document: str, chunk_size: int = 1000) -> List[str]:
+    """Returns chunks from the documents"""
+    return [document[i : i + chunk_size] for i in range(0, len(document), chunk_size)]
 
 
 if __name__ == "__main__":
@@ -75,19 +114,11 @@ if __name__ == "__main__":
     lm = dspy.LM(model="ollama_chat/llama3.1", temperature=0.2)
     dspy.configure(lm=lm)
 
-    class RAG(dspy.Module):
-        def __init__(self):
-            self.retriever = chromadb_rm.ChromadbRM(
-                collection_name="sample_collection", persist_directory="./db"
-            )
-
-            self.respond = dspy.ChainOfThought("context, question -> answer")
-
-        def forward(self, question):
-            ref_docs = self.retriever(question)
-            contexts = [doc["long_text"] for doc in ref_docs]
-            return self.respond(context=contexts, question=question)
-
     rag = RAG()
     print(rag(question="How is the BERT model different from GPT?").answer)
     print(rag(question="Can you summarize this document?").answer)
+
+    summarizer = MapReduceSummarizer()
+    chunks = get_chunks(" ".join(docs), chunk_size=5000)
+    final_summary = summarizer(chunks)
+    print(final_summary)
